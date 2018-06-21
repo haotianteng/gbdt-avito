@@ -10,9 +10,9 @@ import numpy as np
 from sklearn import preprocessing
 
 print('load data.')
-df_train = pd.read_csv("/home/heavens/cqt-avito/data/train.csv",sep = ',')
-df_test = pd.read_csv("/home/heavens/cqt-avito/data/test.csv",sep = ',')
-
+df_train = pd.read_csv("/data/avito/train.csv",sep = ',')
+df_test = pd.read_csv("/data/avito/test.csv",sep = ',')
+pred_file = "/data/avito/test_summary"
 print('preprocess data')
 #Preprocess data
 df_train = df_train.fillna('NaN')
@@ -42,16 +42,20 @@ x_train = retype(x_train,cat_labels = cat_labels,val_labels = val_labels)
 x_test = retype(x_test,cat_labels = cat_labels,val_labels = val_labels)
 x_test[nan_x_test] = np.nan
 x_train[nan_x_train] = np.nan
-#x_train = x_train.values
+x_valid = x_train[:1000]
+y_valid = y_train[:1000]
+x_train = x_train[1000:]
+y_train = y_train[1000:]
+
+print('Train data size:' + str(x_train.size))
+print('Valid data size:' + str(x_valid.size))
 
 print('Construct lgb dataset')
 params = {
     'boosting_type': 'gbdt',
     'objective': 'regression',
     'metric': {'l2', 'auc'},
-    'num_leaves': 31,
-    'num_trees':100,
-    'max_depth':7,
+    'num_leaves': 128,
     'learning_rate': 0.01,
     'feature_fraction': 0.9,
     'bagging_fraction': 0.8,
@@ -61,15 +65,16 @@ params = {
 lgb_train = lgb.Dataset(x_train, 
                         label = y_train,
                        free_raw_data=False)
+lgb_valid = lgb.Dataset(x_valid, label = y_valid, free_raw_data = False)
 
 print('begin training')
 gbm = lgb.train(params,
                 lgb_train,
-                num_boost_round=2000,
-                valid_sets=lgb_train,
+                num_boost_round=5000,
+                valid_sets=lgb_valid,
                 feature_name = cat_labels+val_labels,
                 categorical_feature = cat_labels,
-                early_stopping_rounds=10)
+                early_stopping_rounds=None)
 
 print('Save model...')
 # save model to file
@@ -79,3 +84,10 @@ print('Start predicting...')
 # predict
 y_pred = gbm.predict(x_test, num_iteration=gbm.best_iteration)
 
+with open(pred_file) as f
+    f.write('item_id\tdeal_probability\n')
+    for idx,item in enumerate(y_pred):
+        f.write(df_test['item_id'][idx])
+        f.write('\t')
+        f.write(y_pred[idx])
+        f.write('\n')
