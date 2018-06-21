@@ -70,7 +70,7 @@ lgb_valid = lgb.Dataset(x_valid, label = y_valid, free_raw_data = False)
 print('begin training')
 gbm = lgb.train(params,
                 lgb_train,
-                num_boost_round=5000,
+                num_boost_round=1000,
                 valid_sets=lgb_valid,
                 feature_name = cat_labels+val_labels,
                 categorical_feature = cat_labels,
@@ -84,7 +84,7 @@ print('Start predicting...')
 # predict
 y_pred = gbm.predict(x_test, num_iteration=gbm.best_iteration)
 
-with open(pred_file) as f
+with open(pred_file) as f:
     f.write('item_id\tdeal_probability\n')
     for idx,item in enumerate(y_pred):
         f.write(df_test['item_id'][idx])
