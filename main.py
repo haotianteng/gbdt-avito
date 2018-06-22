@@ -1,93 +1,188 @@
-# -*- coding: utf-8 -*-
-"""
-Spyder Editor
+## construct main function.
 
-This is a temporary script file.
-"""
-import lightgbm as lgb
-import pandas as pd
+import argparse
+import os
+import sys
+
 import numpy as np
-from sklearn import preprocessing
+import keras.backend as backend
+from keras.optimizers import Adam
+# from keras.models import Model
 
-print('load data.')
-df_train = pd.read_csv("/data/avito/train.csv",sep = ',')
-df_test = pd.read_csv("/data/avito/test.csv",sep = ',')
-pred_file = "/data/avito/test_summary"
-print('preprocess data')
-#Preprocess data
-df_train = df_train.fillna('NaN')
-df_test = df_test.fillna('NaN')
-cat_labels = ['region','city','parent_category_name','category_name','param_1','param_2','param_3','user_type']
-val_labels = ['price','image_top_1']
-drop_labels = ['deal_probability','item_id','user_id','title','description','activation_date','image','item_seq_number']
-y_train = df_train['deal_probability'].values
-x_train = df_train.drop(labels=drop_labels,axis = 1)
-x_test = df_test.drop(labels = drop_labels[1:],axis = 1)
 
-le = preprocessing.LabelEncoder()
-nan_x_train = x_train == 'NaN'
-nan_x_test = x_test == 'NaN'
-#Label encoding the categorical data
-def retype(dataset,cat_labels,val_labels):
-    for i in range(0,dataset.shape[1]):
-        if dataset.dtypes[i]=='object':
-            if dataset.columns[i] in cat_labels:
-                print(dataset.columns[i])
-                dataset[dataset.columns[i]] = le.fit_transform(dataset[dataset.columns[i]])
-            if dataset.columns[i] in val_labels:
-                dataset[dataset.columns[i]] = dataset[dataset.columns[i]].astype('float')
-    return dataset
+import configuration
+import prepare_training_data
+import model
 
-x_train = retype(x_train,cat_labels = cat_labels,val_labels = val_labels)
-x_test = retype(x_test,cat_labels = cat_labels,val_labels = val_labels)
-x_test[nan_x_test] = np.nan
-x_train[nan_x_train] = np.nan
-x_valid = x_train[:1000]
-y_valid = y_train[:1000]
-x_train = x_train[1000:]
-y_train = y_train[1000:]
 
-print('Train data size:' + str(x_train.size))
-print('Valid data size:' + str(x_valid.size))
 
-print('Construct lgb dataset')
-params = {
-    'boosting_type': 'gbdt',
-    'objective': 'regression',
-    'metric': {'l2', 'auc'},
-    'num_leaves': 128,
-    'learning_rate': 0.01,
-    'feature_fraction': 0.9,
-    'bagging_fraction': 0.8,
-    'bagging_freq': 5,
-    'verbose': 0,
-}
-lgb_train = lgb.Dataset(x_train, 
-                        label = y_train,
-                       free_raw_data=False)
-lgb_valid = lgb.Dataset(x_valid, label = y_valid, free_raw_data = False)
+GlOBAL_PARAMETERS = None
 
-print('begin training')
-gbm = lgb.train(params,
-                lgb_train,
-                num_boost_round=1000,
-                valid_sets=lgb_valid,
-                feature_name = cat_labels+val_labels,
-                categorical_feature = cat_labels,
-                early_stopping_rounds=None)
+def parse_argument():
+    
+    parser = argparse.ArgumentParser()
+    
+    # model
+    parser.add_argument(
+        '--model_architecture',
+        type = str,
+        default = 'single_fc',
+        help='model architecture: xception_single_fc or xception_shallow'
+    )
+    parser.add_argument(
+        '--num_layer',
+        type = int,
+        default = 1,
+        help='The number of hidden layers'
+    )
+    parser.add_argument(
+        '--num_hidden_unit',
+        type=str,
+        default='5',
+        help = 'A list of numbers determing the size of each hidden layer'
+    )
+    
+    # train, test, or inference
+    parser.add_argument(
+        '--phase',
+        type=str,
+        default='inference',
+        help='Phase can be: train, test, or inference'
+    )
+    
+    
+    # training
+    parser.add_argument(
+        '--learning_rate',
+        type=float,
+        default= 0.001,
+        help='learning rate. Adam algorithm is used.'
+    )
+    parser.add_argument(
+        '--is_shuffle',
+        type=bool,
+        default=0,
+        help='0:No shuffle, use real data to train the algorithm. 1: Do shuffle, use the shuffled data to build baseline performance'
+    )
+    parser.add_argument(
+        '--batch_size',
+        type=int,
+        default=100,
+        help='batch size, the batch_size in configuration is used only for feature extraction'
+    )
+    parser.add_argument(
+        '--n_epoch',
+        type=int,
+        default=10,
+        help='number of epochs for training'
+    )
+    parser.add_argument(
+        '--optimizer',
+        type=str,
+        default='Adam',
+        help='Which optimization method to use. Default is Adam. Default param : Beta_1=0.9, Beta_2=0.99, decay=0.01'
+    )
+    #
+    
+#     global_parameters, unparsed = parser.parse_known_args()
+    
+    return parser    
+    
+def main():
+    
+    # get parameter from command line.
+    parser =  parse_argument()
+    global_parameters, unparsed =  parser.parse_known_args()
+    input_shape = configuration.feature_size 
+    
+    # unparse data 
+    phase      = global_parameters.phase
+    batch_size = global_parameters.batch_size
+    
+    
+    model_architecture = global_parameters.model_architecture
+   
+    model_settings = dict()
+    model_settings['input_shape']     = input_shape
+    model_settings['num_hidden_unit'] = global_parameters.num_hidden_unit
+    model_settings['num_layer']       = global_parameters.num_layer
+    
+    if phase == 'train':
+        # get relevant parameters
+        learning_rate = global_parameters.learning_rate
+        n_epoch = global_parameters.n_epoch
+        training_model_folder = configuration.training_model_folder
+        training_result_folder = configuration.training_log_folder
+        
+        # build model.
+        backend.clear_session()
+        model_train =  model.create_model(model_architecture, model_settings)
+            
+        # compile model.
+        opt  = Adam(lr=0.01, beta_1=0.9, beta_2=0.99, decay=0.01)
+        model_train.compile(optimizer=opt, loss='logcosh', metrics=['mse'])
+        
+        # load data generator
+        training_generator  = prepare_training_data.DataGenerator(input_shape, batch_size, 'train', 
+                                                                 configuration.train_csv_file, 
+                                                                 configuration.feature_folder, 
+                                                                 y_shuffle = global_parameters.is_shuffle)
+        validation_generator = prepare_training_data.DataGenerator(input_shape, batch_size, 'validation', 
+                                                                 configuration.train_csv_file, 
+                                                                 configuration.feature_folder, 
+                                                                  y_shuffle = False)
+        
+        ## training
+        train_history = model_train.fit_generator(generator          = training_generator,
+                                                  validation_data    = validation_generator, 
+                                                  epochs             = n_epoch)
 
-print('Save model...')
-# save model to file
-gbm.save_model('model.txt')
+        ## Saving. 
+        # model and weights
+        if not global_parameters.is_shuffle:
+            model.train_utils_save(model_train,  model_architecture, training_model_folder)
+        # training result. name = model_architecture + 'baseline' + '0'/'1'
+        model.train_utils_save_trainhistory(train_history, 
+                                            model_architecture + '_baseline_' + str(global_parameters.is_shuffle), 
+                                            training_result_folder)  
+        
+        
+    elif phase == 'test':
+        # do we even have a testing data. maybe not.
+        print('testing')
+    
+    elif phase == 'inference':
+        
+        # load model
+        training_model_folder = configuration.training_model_folder
+        inference_storage_folder = configuration.inference_folder
+        
+        model_train = model.inference_utils_load(model_architecture, training_model_folder)
+        
+        # load inference generator.
+        inference_generator  = prepare_training_data.DataGenerator(input_shape, batch_size, 'inference', 
+                                                 configuration.test_csv_file, 
+                                                 configuration.feature_folder_inference)
+        # predict
+        prediction = model_train.predict_generator(inference_generator)
+        item_id = inference_generator.item_id
 
-print('Start predicting...')
-# predict
-y_pred = gbm.predict(x_test, num_iteration=gbm.best_iteration)
+        # save
+        inference_save_prediction(item_id, prediction, inference_storage_folder)
+        
+    else:
+        raise Exception('Phase: {} is not recognized. It has to be one of {train, test, inference}'.format(phase))
 
-with open(pred_file) as f:
-    f.write('item_id\tdeal_probability\n')
-    for idx,item in enumerate(y_pred):
-        f.write(df_test['item_id'][idx])
-        f.write('\t')
-        f.write(y_pred[idx])
-        f.write('\n')
+        
+def inference_save_prediction(item_id, prediction, inference_folder):
+    if not os.path.exists(inference_folder):
+        os.makedirs(inference_folder)
+    fn = os.path.join(configuration.inference_result, 'prediction')
+    result = np.vstack((item_id, np.squeeze(prediction)))
+    np.save(fn, result)
+    
+    
+if __name__ == '__main__':
+    
+    main()
+    
