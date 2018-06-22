@@ -2,11 +2,13 @@ import os
 
 data_folder = 'C:\\Juyue_Personal\\Avito_data'
 training_folder = 'C:\\Juyue_Personal\\Avito_training'
+
 train_csv_file = os.path.join(data_folder, 'train.csv', 'train.csv')
 test_csv_file = os.path.join(data_folder, 'test.csv', 'test.csv')
 inference_folder = os.path.join(data_folder, 'inference')
-image_folder = os.path.join(data_folder, 'train_jpg_0')
 
+image_folder = os.path.join(data_folder, 'train_jpg_0')
+image_folder_inference = os.paht.joint(data_folder, 'inference_image')
 ## feature extraction
 batch_size = 10
 
