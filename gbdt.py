@@ -7,11 +7,15 @@ This is a temporary script file.
 import lightgbm as lgb
 import pandas as pd
 import numpy as np
+import csv
 from sklearn import preprocessing
 
 print('load data.')
-df_train = pd.read_csv("/home/havens_teng/avito/avito-demand-prediction/train.csv",sep = ',')
-df_test = pd.read_csv("/home/havens_teng/avito/avito-demand-prediction/test.csv",sep = ',')
+train_f = "/home/havens_teng/avito/avito-demand-prediction/train.csv"
+test_f = "/home/havens_teng/avito/avito-demand-prediction/test.csv"
+df_train = pd.read_csv(train_f,sep = ',',header = 0)
+df_test = pd.read_csv(test_f,sep=',',header = 0)
+
 pred_file = "/home/havens_teng/avito/avito-demand-prediction/test_summary"
 print('preprocess data')
 #Preprocess data
@@ -53,12 +57,13 @@ print('Valid data size:' + str(x_valid.size))
 print('Construct lgb dataset')
 params = {
     'boosting_type': 'gbdt',
-    'objective': 'regression',
-    'metric': {'l2', 'auc'},
-    'num_leaves': 128,
-    'learning_rate': 0.01,
+    'objective':'xentropy',
+    'metric': {'l2_root', 'auc'},
+    'num_leaves': 31,
+    'lambda_l1': 0.1,
+    'learning_rate': 0.03,
     'feature_fraction': 0.9,
-    'bagging_fraction': 0.8,
+    'bagging_fraction': 0.9,
     'bagging_freq': 5,
     'verbose': 0,
 }
@@ -70,7 +75,7 @@ lgb_valid = lgb.Dataset(x_valid, label = y_valid, free_raw_data = False)
 print('begin training')
 gbm = lgb.train(params,
                 lgb_train,
-                num_boost_round=1000,
+                num_boost_round=200,
                 valid_sets=lgb_valid,
                 feature_name = cat_labels+val_labels,
                 categorical_feature = cat_labels,
@@ -85,9 +90,14 @@ print('Start predicting...')
 y_pred = gbm.predict(x_test, num_iteration=gbm.best_iteration)
 
 with open(pred_file,'w+') as f:
-    f.write('item_id\tdeal_probability\n')
+    f.write('item_id,deal_probability')
+    f.write('\n')
     for idx,item in enumerate(y_pred):
+        if y_pred[idx]<0:
+            y_pred[idx] = 0
+        if y_pred[idx]>1:
+            y_pred[idx] =1
         f.write(str(df_test['item_id'][idx]))
-        f.write('\t')
+        f.write(',')
         f.write(str(y_pred[idx]))
         f.write('\n')
