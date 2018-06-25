@@ -8,48 +8,20 @@ import lightgbm as lgb
 import pandas as pd
 import numpy as np
 import csv
-from sklearn import preprocessing
+from gbdt_input import prepare_train_dataset as data
+from gbdt_input import balance_datasets
+
+CAT_LABELS = ['region','city','parent_category_name','category_name','param_1','param_2','param_3','user_type']
+VAL_LABELS = ['price','image_top_1']
 
 print('load data.')
-train_f = "/home/havens_teng/avito/avito-demand-prediction/train.csv"
-test_f = "/home/havens_teng/avito/avito-demand-prediction/test.csv"
-df_train = pd.read_csv(train_f,sep = ',',header = 0)
-df_test = pd.read_csv(test_f,sep=',',header = 0)
+train_f = '/home/heavens/cqt-avito/data/train.csv'
+test_f = '/home/heavens/cqt-avito/data/test.csv'
+pred_file = '/home/heavens/cqt-avito/data/test_summary'
 
-pred_file = "/home/havens_teng/avito/avito-demand-prediction/test_summary"
-print('preprocess data')
-#Preprocess data
-df_train = df_train.fillna('NaN')
-df_test = df_test.fillna('NaN')
-cat_labels = ['region','city','parent_category_name','category_name','param_1','param_2','param_3','user_type']
-val_labels = ['price','image_top_1']
-drop_labels = ['deal_probability','item_id','user_id','title','description','activation_date','image','item_seq_number']
-y_train = df_train['deal_probability'].values
-x_train = df_train.drop(labels=drop_labels,axis = 1)
-x_test = df_test.drop(labels = drop_labels[1:],axis = 1)
-
-le = preprocessing.LabelEncoder()
-nan_x_train = x_train == 'NaN'
-nan_x_test = x_test == 'NaN'
-#Label encoding the categorical data
-def retype(dataset,cat_labels,val_labels):
-    for i in range(0,dataset.shape[1]):
-        if dataset.dtypes[i]=='object':
-            if dataset.columns[i] in cat_labels:
-                print(dataset.columns[i])
-                dataset[dataset.columns[i]] = le.fit_transform(dataset[dataset.columns[i]])
-            if dataset.columns[i] in val_labels:
-                dataset[dataset.columns[i]] = dataset[dataset.columns[i]].astype('float')
-    return dataset
-
-x_train = retype(x_train,cat_labels = cat_labels,val_labels = val_labels)
-x_test = retype(x_test,cat_labels = cat_labels,val_labels = val_labels)
-x_test[nan_x_test] = np.nan
-x_train[nan_x_train] = np.nan
-x_valid = x_train[:1000]
-y_valid = y_train[:1000]
-x_train = x_train[1000:]
-y_train = y_train[1000:]
+x_train,y_train,x_valid,y_valid = data(train_f,valid_size = 1000)
+x_test = data(test_f,for_eval = True)
+datasets_iter = balance_datasets(x_train,y_train)
 
 print('Train data size:' + str(x_train.size))
 print('Valid data size:' + str(x_valid.size))
@@ -57,16 +29,19 @@ print('Valid data size:' + str(x_valid.size))
 print('Construct lgb dataset')
 params = {
     'boosting_type': 'gbdt',
-    'objective':'xentropy',
-    'metric': {'l2_root', 'auc'},
-    'num_leaves': 31,
-    'lambda_l1': 0.1,
-    'learning_rate': 0.03,
-    'feature_fraction': 0.9,
-    'bagging_fraction': 0.9,
-    'bagging_freq': 5,
+    'objective':'regression',
+    'metric': {'rmse'},
+    'num_leaves': 270,
+    'lambda_l1': 0.01,
+    'learning_rate': 0.0175,
+    'feature_fraction': 0.5,
+    'bagging_fraction': 0.75,
+    'bagging_freq': 2,
     'verbose': 0,
 }
+#for x_sub in datasets_iter:
+#    x_train,y_train = x_sub
+#    break
 lgb_train = lgb.Dataset(x_train, 
                         label = y_train,
                        free_raw_data=False)
@@ -75,11 +50,11 @@ lgb_valid = lgb.Dataset(x_valid, label = y_valid, free_raw_data = False)
 print('begin training')
 gbm = lgb.train(params,
                 lgb_train,
-                num_boost_round=200,
+                num_boost_round=20000,
                 valid_sets=lgb_valid,
-                feature_name = cat_labels+val_labels,
-                categorical_feature = cat_labels,
-                early_stopping_rounds=None)
+                feature_name = x_train.columns.tolist(),
+                categorical_feature = CAT_LABELS,
+                early_stopping_rounds = 50)
 
 print('Save model...')
 # save model to file
@@ -97,7 +72,7 @@ with open(pred_file,'w+') as f:
             y_pred[idx] = 0
         if y_pred[idx]>1:
             y_pred[idx] =1
-        f.write(str(df_test['item_id'][idx]))
+        f.write(str(x_test['item_id'][idx]))
         f.write(',')
         f.write(str(y_pred[idx]))
         f.write('\n')
